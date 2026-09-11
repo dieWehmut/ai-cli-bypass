@@ -1,6 +1,7 @@
 import {
   Activity,
   Bot,
+  CircleAlert,
   CirclePause,
   CirclePlay,
   Gauge,
@@ -10,6 +11,7 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  Plug,
   Power,
   RefreshCw,
   Save,
@@ -19,12 +21,15 @@ import {
   Sun,
   Terminal,
   Trash2,
+  Unplug,
+  Webhook,
   X,
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   createApi,
   type AuditEvent,
+  type ClaudeHookStatusView,
   type HealthView,
   type SessionView,
   type WatchdogApi,
@@ -56,6 +61,13 @@ const fallbackConfig: WatchdogConfig = {
     },
   },
   processFilters: { sameUserOnly: true, include: [], exclude: [] },
+};
+
+const fallbackHookStatus: ClaudeHookStatusView = {
+  installed: false,
+  enabled: false,
+  restartRequired: false,
+  manualReviewRequired: false,
 };
 
 const now = Date.now();
@@ -323,6 +335,7 @@ function Timeline({ events }: { events: AuditEvent[] }) {
 
 function SettingsPanel(props: {
   config: WatchdogConfig;
+  hookStatus: ClaudeHookStatusView;
   saving: boolean;
   running: boolean;
   onSave: (config: WatchdogConfig) => Promise<void>;
@@ -330,6 +343,9 @@ function SettingsPanel(props: {
   onInstall: () => Promise<void>;
   startupInstalled: boolean;
   onToggleStartup: () => Promise<void>;
+  onInstallClaudeHook: () => Promise<void>;
+  onUninstallClaudeHook: () => Promise<void>;
+  onDisableClaudeHook: () => Promise<void>;
   onUninstall: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState(() => structuredClone(props.config));
@@ -373,6 +389,41 @@ function SettingsPanel(props: {
         </div>
         <div className="switch-row"><div><strong>Dry run</strong><span>只记录决策，不写入进程</span></div><label className="switch"><input aria-label="Dry run" type="checkbox" checked={draft.dryRun} onChange={(event) => setDraft({ ...draft, dryRun: event.target.checked })} /><span /></label></div>
       </section>
+      <section className="settings-section settings-section--wide hook-settings">
+        <div className="section-title hook-settings__title">
+          <div><span className="eyebrow">Claude</span><h2>Claude Stop Hook</h2></div>
+          <Webhook size={20} />
+        </div>
+        <div className="hook-status-list" aria-label="Claude Stop Hook 状态">
+          <span className={`state-chip ${props.hookStatus.manualReviewRequired ? 'state-chip--error' : props.hookStatus.installed ? 'state-chip--ready' : 'state-chip--limited'}`}>
+            <span className="state-chip__dot" />
+            {props.hookStatus.manualReviewRequired ? '需人工检查' : props.hookStatus.installed ? '已安装' : '未安装'}
+          </span>
+          <span className={`state-chip ${props.hookStatus.enabled ? 'state-chip--ready' : 'state-chip--limited'}`}>
+            <span className="state-chip__dot" />
+            {props.hookStatus.enabled ? '已启用' : '未启用'}
+          </span>
+          {props.hookStatus.restartRequired && <span className="state-chip state-chip--waiting"><span className="state-chip__dot" />需重启 Claude</span>}
+        </div>
+        <div className="hook-settings__body">
+          <div>
+            <div className="field-grid hook-settings__fields">
+              <label><span>Lease 有效期（毫秒）</span><input aria-label="Lease 有效期（毫秒）" type="number" min="1" value={draft.tools.claude.stopHook.leaseTtlMs} onChange={(event) => setDraft({ ...draft, tools: { ...draft.tools, claude: { ...draft.tools.claude, stopHook: { ...draft.tools.claude.stopHook, leaseTtlMs: Number(event.target.value) } } } })} /></label>
+              <label><span>命令超时（毫秒）</span><input aria-label="命令超时（毫秒）" type="number" min="1" value={draft.tools.claude.stopHook.commandTimeoutMs} onChange={(event) => setDraft({ ...draft, tools: { ...draft.tools, claude: { ...draft.tools.claude, stopHook: { ...draft.tools.claude.stopHook, commandTimeoutMs: Number(event.target.value) } } } })} /></label>
+            </div>
+            <div className="switch-row"><div><strong>启用 Stop Hook 续写</strong><span>仅对唯一关联且已静默的 Claude 会话创建一次性 Lease</span></div><label className="switch"><input aria-label="启用 Claude Stop Hook" type="checkbox" checked={draft.tools.claude.stopHook.enabled} onChange={(event) => setDraft({ ...draft, tools: { ...draft.tools, claude: { ...draft.tools.claude, stopHook: { ...draft.tools.claude.stopHook, enabled: event.target.checked } } } })} /><span /></label></div>
+          </div>
+          <div className="hook-settings__control">
+            <p className="hook-disclosure"><CircleAlert size={17} /><span>安装会修改 <code>~/.claude/settings.json</code>。已打开的 Claude 会话需要重启后才能加载 Hook。</span></p>
+            {props.hookStatus.lastError && <p className="hook-error" role="alert">{props.hookStatus.lastError}</p>}
+            <div className="hook-actions">
+              {!props.hookStatus.installed && !props.hookStatus.manualReviewRequired && <button className="button button--secondary" type="button" onClick={() => void props.onInstallClaudeHook()} disabled={props.saving}><Plug size={17} />安装 Stop Hook</button>}
+              {props.hookStatus.enabled && <button className="button button--stop" type="button" onClick={() => void props.onDisableClaudeHook()} disabled={props.saving}><Power size={17} />停用 Stop Hook</button>}
+              {(props.hookStatus.installed || props.hookStatus.manualReviewRequired) && <button className="button button--danger" type="button" onClick={() => void props.onUninstallClaudeHook()} disabled={props.saving}><Unplug size={17} />卸载 Stop Hook</button>}
+            </div>
+          </div>
+        </div>
+      </section>
       <section className="settings-section settings-section--wide">
         <div className="section-title"><div><span className="eyebrow">Processes</span><h2>进程范围</h2></div><ShieldAlert size={20} /></div>
         <div className="field-grid">
@@ -397,6 +448,7 @@ export default function App({ api: suppliedApi }: AppProps) {
   const [sidebarCompact, setSidebarCompact] = useState(false);
   const [health, setHealth] = useState<HealthView>({ ok: false, running: false, dryRun: true, lastPollAtMs: null });
   const [startupInstalled, setStartupInstalled] = useState(false);
+  const [hookStatus, setHookStatus] = useState<ClaudeHookStatusView>(fallbackHookStatus);
   const [config, setConfig] = useState(fallbackConfig);
   const [sessions, setSessions] = useState<SessionView[]>(fallbackSessions);
   const [events, setEvents] = useState<AuditEvent[]>(fallbackEvents);
@@ -432,8 +484,19 @@ export default function App({ api: suppliedApi }: AppProps) {
 
   const refresh = async () => {
     try {
-      const [nextHealth, nextConfig, nextSessions, nextStartup] = await Promise.all([api.health(), api.config(), api.sessions(), api.startup()]);
-      setHealth(nextHealth); setConfig(nextConfig); setSessions(nextSessions); setStartupInstalled(nextStartup.installed); setConnected(true);
+      const [nextHealth, nextConfig, nextSessions, nextStartup, nextHookStatus] = await Promise.all([
+        api.health(),
+        api.config(),
+        api.sessions(),
+        api.startup(),
+        api.claudeHook(),
+      ]);
+      setHealth(nextHealth);
+      setConfig(nextConfig);
+      setSessions(nextSessions);
+      setStartupInstalled(nextStartup.installed);
+      setHookStatus(nextHookStatus);
+      setConnected(true);
     } catch {
       setConnected(false);
     }
@@ -464,9 +527,52 @@ export default function App({ api: suppliedApi }: AppProps) {
 
   const saveConfig = async (nextConfig: WatchdogConfig) => {
     setSaving(true); setNotice(null);
-    try { setConfig(await api.updateConfig(nextConfig)); setNotice('配置已保存'); }
+    try {
+      const saved = await api.updateConfig(nextConfig);
+      setConfig(saved);
+      setHookStatus((current) => ({ ...current, enabled: saved.tools.claude.stopHook.enabled }));
+      setNotice('配置已保存');
+    }
     catch (error) { setNotice(error instanceof Error ? error.message : '保存失败'); }
     finally { setSaving(false); }
+  };
+
+  const updateClaudeHook = async (action: 'disable' | 'install' | 'uninstall') => {
+    setSaving(true);
+    setNotice(null);
+    try {
+      const status = action === 'install'
+        ? await api.installClaudeHook()
+        : action === 'uninstall'
+          ? await api.uninstallClaudeHook()
+          : await api.disableClaudeHook();
+      setHookStatus(status);
+      if (action === 'disable') {
+        setConfig((current) => ({
+          ...current,
+          tools: {
+            ...current.tools,
+            claude: {
+              ...current.tools.claude,
+              stopHook: { ...current.tools.claude.stopHook, enabled: false },
+            },
+          },
+        }));
+      }
+      if (status.manualReviewRequired) {
+        setNotice(status.lastError ?? 'Stop Hook 需要人工检查');
+      } else if (action === 'install') {
+        setNotice(status.restartRequired ? 'Stop Hook 已安装；需重启 Claude' : 'Stop Hook 已安装');
+      } else if (action === 'uninstall') {
+        setNotice('Stop Hook 已卸载');
+      } else {
+        setNotice('Stop Hook 已停用并清空待处理 Lease');
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Stop Hook 操作失败');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const uninstall = async () => {
@@ -552,7 +658,7 @@ export default function App({ api: suppliedApi }: AppProps) {
         </div>}
 
         {page === 'timeline' && <div className="page-content"><section className="content-section"><div className="section-heading"><div><span className="eyebrow">Audit</span><h2>决策与写入</h2></div><span className="section-meta">{events.length} 条</span></div><Timeline events={events} /></section></div>}
-        {page === 'settings' && <div className="page-content"><SettingsPanel config={config} saving={saving} running={health.running} onSave={saveConfig} onToggle={toggleWatchdog} onInstall={install} startupInstalled={startupInstalled} onToggleStartup={toggleStartup} onUninstall={uninstall} /></div>}
+        {page === 'settings' && <div className="page-content"><SettingsPanel config={config} hookStatus={hookStatus} saving={saving} running={health.running} onSave={saveConfig} onToggle={toggleWatchdog} onInstall={install} startupInstalled={startupInstalled} onToggleStartup={toggleStartup} onInstallClaudeHook={() => updateClaudeHook('install')} onUninstallClaudeHook={() => updateClaudeHook('uninstall')} onDisableClaudeHook={() => updateClaudeHook('disable')} onUninstall={uninstall} /></div>}
       </main>
     </div>
   );

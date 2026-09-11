@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import App from '../src/App';
-import type { WatchdogApi, WatchdogEvent } from '../src/api/client';
+import type { SessionView, WatchdogApi, WatchdogEvent } from '../src/api/client';
 
 function api(): WatchdogApi {
   const config = {
@@ -94,6 +94,65 @@ describe('watchdog dashboard', () => {
     })));
   });
 
+  it('renders and manages the explicit Claude Stop Hook settings', async () => {
+    const fake = api();
+    render(<App api={fake} />);
+    fireEvent.click((await screen.findAllByRole('button', { name: '设置' }))[0]);
+
+    expect(await screen.findByRole('heading', { name: 'Claude Stop Hook' })).toBeInTheDocument();
+    expect(screen.getByText(/~\/\.claude\/settings\.json/)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: '启用 Claude Stop Hook' })).not.toBeChecked();
+    expect(screen.getByLabelText('Lease 有效期（毫秒）')).toHaveValue(15_000);
+    expect(screen.getByLabelText('命令超时（毫秒）')).toHaveValue(1_500);
+
+    fireEvent.click(screen.getByRole('button', { name: '安装 Stop Hook' }));
+    await waitFor(() => expect(fake.installClaudeHook).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('需重启 Claude')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '卸载 Stop Hook' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '启用 Claude Stop Hook' }));
+    fireEvent.change(screen.getByLabelText('Lease 有效期（毫秒）'), { target: { value: '20000' } });
+    fireEvent.change(screen.getByLabelText('命令超时（毫秒）'), { target: { value: '1800' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存配置' }));
+    await waitFor(() => expect(fake.updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      tools: expect.objectContaining({
+        claude: expect.objectContaining({
+          stopHook: { enabled: true, leaseTtlMs: 20_000, commandTimeoutMs: 1_800 },
+        }),
+      }),
+    })));
+
+    fireEvent.click(await screen.findByRole('button', { name: '停用 Stop Hook' }));
+    await waitFor(() => expect(fake.disableClaudeHook).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '卸载 Stop Hook' }));
+    await waitFor(() => expect(fake.uninstallClaudeHook).toHaveBeenCalledTimes(1));
+  });
+
+  it('allows exact-session Stop Hook continuation while monitor-only remains disabled', async () => {
+    const fake = api();
+    const isolatedSessions: SessionView[] = [
+      {
+        id: 'hook', tool: 'claude', rootPid: 21, childPids: [], conversationId: 'session-hook', goal: null,
+        transport: 'claude-stop-hook', alive: true, enabled: true, paused: false, startedAtMs: 1,
+        lastActivityAtMs: 2, quietForMs: 130_000, pendingPrompt: '请继续', lastDecision: 'awaiting-quiet-period',
+      },
+      {
+        id: 'monitor', tool: 'claude', rootPid: 22, childPids: [], conversationId: 'session-monitor', goal: null,
+        transport: 'monitor-only', alive: true, enabled: true, paused: false, startedAtMs: 1,
+        lastActivityAtMs: 2, quietForMs: 130_000, pendingPrompt: '请继续', lastDecision: 'cannot-inject',
+      },
+    ];
+    fake.sessions = vi.fn(async (): Promise<SessionView[]> => isolatedSessions);
+    render(<App api={fake} />);
+
+    const hookAction = (await screen.findAllByRole('button', { name: '立即续写 PID 21' }))[0];
+    const monitorAction = screen.getAllByRole('button', { name: '立即续写 PID 22' })[0];
+    expect(hookAction).toBeEnabled();
+    expect(monitorAction).toBeDisabled();
+    fireEvent.click(hookAction);
+    await waitFor(() => expect(fake.inject).toHaveBeenCalledWith('hook'));
+  });
+
   it('stops and restarts the watchdog from the local controls', async () => {
     const running = api();
     const first = render(<App api={running} />);
@@ -126,6 +185,7 @@ describe('watchdog dashboard', () => {
   it('refreshes authoritative state when a named realtime event arrives', async () => {
     const fake = api();
     const sessions = vi.mocked(fake.sessions);
+    const claudeHook = vi.mocked(fake.claudeHook);
     let receive: ((event: WatchdogEvent) => void) | undefined;
     fake.subscribe = vi.fn((listener) => {
       receive = listener;
@@ -136,6 +196,9 @@ describe('watchdog dashboard', () => {
     const callsBefore = sessions.mock.calls.length;
     receive?.({ kind: 'sessions', data: { action: 'inject', sessionId: 'goal' } });
     await waitFor(() => expect(sessions.mock.calls.length).toBeGreaterThan(callsBefore));
+    const hookCallsBefore = claudeHook.mock.calls.length;
+    receive?.({ kind: 'claude-hook', data: { installed: true } });
+    await waitFor(() => expect(claudeHook.mock.calls.length).toBeGreaterThan(hookCallsBefore));
   });
 
   it('locks the page while the mobile drawer is open and closes it with Escape', async () => {
