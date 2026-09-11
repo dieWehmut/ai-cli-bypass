@@ -49,4 +49,41 @@ test.describe('Selbstlauf watchdog workbench', () => {
     await expect(page.locator('.sidebar')).not.toHaveClass(/is-open/);
     await expect(page.locator('body')).not.toHaveCSS('overflow', 'hidden');
   });
+
+  test('manages Claude Stop Hook settings in the static Pages demo', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/');
+    await page.getByRole('button', { name: '设置' }).click();
+
+    const hookSection = page.locator('.hook-settings');
+    await expect(hookSection.getByRole('heading', { name: 'Claude Stop Hook' })).toBeVisible();
+    await expect(hookSection.getByText('~/.claude/settings.json')).toBeVisible();
+    await expect(hookSection.getByRole('checkbox', { name: '启用 Claude Stop Hook' })).not.toBeChecked();
+    await hookSection.getByRole('button', { name: '安装 Stop Hook' }).click();
+    await expect(hookSection.getByText('需重启 Claude')).toBeVisible();
+    await hookSection.getByRole('checkbox', { name: '启用 Claude Stop Hook' }).check();
+    await page.getByRole('button', { name: '保存配置' }).click();
+    await expect(hookSection.getByText('已启用')).toBeVisible();
+    await hookSection.getByRole('button', { name: '停用 Stop Hook' }).click();
+    await expect(hookSection.getByText('未启用')).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: testInfo.outputPath('hook-settings-desktop-1280x900.png'), fullPage: true });
+  });
+
+  test('keeps Claude Hook controls readable on a narrow mobile viewport', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 360, height: 780 });
+    await page.goto('/');
+    await page.getByRole('button', { name: '打开菜单' }).click();
+    await page.getByRole('button', { name: '设置' }).click();
+
+    const hookSection = page.locator('.hook-settings');
+    await expect(hookSection).toBeVisible();
+    await expect(hookSection.getByRole('button', { name: '安装 Stop Hook' })).toBeVisible();
+    const sectionBox = await hookSection.boundingBox();
+    expect(sectionBox).not.toBeNull();
+    expect(sectionBox!.x).toBeGreaterThanOrEqual(0);
+    expect(sectionBox!.x + sectionBox!.width).toBeLessThanOrEqual(360);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: testInfo.outputPath('hook-settings-mobile-360x780.png'), fullPage: true });
+  });
 });
