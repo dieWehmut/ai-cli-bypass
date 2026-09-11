@@ -8,7 +8,11 @@ function api(): WatchdogApi {
     enabled: true, dryRun: true, pollIntervalMs: 2_000, defaultIdleTimeoutMs: 120_000,
     defaultCooldownMs: 300_000, maxAttemptsPerQuietPeriod: 1,
     tools: {
-      claude: { enabled: true, normalPrompt: '请继续' },
+      claude: {
+        enabled: true,
+        normalPrompt: '请继续',
+        stopHook: { enabled: false, leaseTtlMs: 15_000, commandTimeoutMs: 1_500 },
+      },
       codex: { enabled: true, normalPrompt: '继续', goalPrompt: '/goal resume', goalStatuses: ['active', 'paused'] },
     }, processFilters: { sameUserOnly: true, include: [], exclude: [] },
   } as const;
@@ -23,7 +27,12 @@ function api(): WatchdogApi {
     updateConfig: vi.fn(async (next) => next),
     sessions: vi.fn(async () => sessions),
     pause: vi.fn(async () => undefined), resume: vi.fn(async () => undefined), inject: vi.fn(async () => undefined),
-    install: vi.fn(async () => undefined), startup: vi.fn(async () => ({ installed: false })), installStartup: vi.fn(async () => undefined), uninstallStartup: vi.fn(async () => undefined), start: vi.fn(async () => undefined), stop: vi.fn(async () => undefined), uninstall: vi.fn(async () => undefined), subscribe: vi.fn(() => () => undefined),
+    install: vi.fn(async () => undefined), startup: vi.fn(async () => ({ installed: false })), installStartup: vi.fn(async () => undefined), uninstallStartup: vi.fn(async () => undefined),
+    claudeHook: vi.fn(async () => ({ installed: false, enabled: false, restartRequired: false, manualReviewRequired: false })),
+    installClaudeHook: vi.fn(async () => ({ installed: true, enabled: false, restartRequired: true, manualReviewRequired: false })),
+    uninstallClaudeHook: vi.fn(async () => ({ installed: false, enabled: false, restartRequired: false, manualReviewRequired: false })),
+    disableClaudeHook: vi.fn(async () => ({ installed: true, enabled: false, restartRequired: true, manualReviewRequired: false })),
+    start: vi.fn(async () => undefined), stop: vi.fn(async () => undefined), uninstall: vi.fn(async () => undefined), subscribe: vi.fn(() => () => undefined),
   };
 }
 

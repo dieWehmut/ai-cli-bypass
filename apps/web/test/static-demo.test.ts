@@ -41,4 +41,34 @@ describe('static Pages demo API', () => {
     await first.uninstallStartup();
     expect((await first.startup()).installed).toBe(false);
   });
+
+  it('models explicit Claude Hook installation, disable, and uninstall in memory', async () => {
+    const api = createStaticDemoApi();
+    expect(await api.claudeHook()).toEqual({
+      installed: false,
+      enabled: false,
+      restartRequired: false,
+      manualReviewRequired: false,
+    });
+
+    expect(await api.installClaudeHook()).toEqual({
+      installed: true,
+      enabled: false,
+      restartRequired: true,
+      manualReviewRequired: false,
+    });
+    const config = await api.config();
+    config.tools.claude.stopHook.enabled = true;
+    await api.updateConfig(config);
+    expect((await api.claudeHook()).enabled).toBe(true);
+
+    expect(await api.disableClaudeHook()).toEqual(expect.objectContaining({ installed: true, enabled: false }));
+    expect((await api.config()).tools.claude.stopHook.enabled).toBe(false);
+    expect(await api.uninstallClaudeHook()).toEqual({
+      installed: false,
+      enabled: false,
+      restartRequired: false,
+      manualReviewRequired: false,
+    });
+  });
 });

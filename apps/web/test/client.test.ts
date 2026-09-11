@@ -31,6 +31,23 @@ describe('local service API client', () => {
       if (path === '/api/startup/uninstall' && init?.method === 'POST') {
         return json({ ok: true });
       }
+      if (path === '/api/claude-hook') {
+        return json({
+          installed: false,
+          enabled: false,
+          restartRequired: false,
+          manualReviewRequired: false,
+        });
+      }
+      if (path === '/api/claude-hook/install' && init?.method === 'POST') {
+        return json({ installed: true, enabled: false, restartRequired: true, manualReviewRequired: false });
+      }
+      if (path === '/api/claude-hook/uninstall' && init?.method === 'POST') {
+        return json({ installed: false, enabled: false, restartRequired: false, manualReviewRequired: false });
+      }
+      if (path === '/api/claude-hook/disable' && init?.method === 'POST') {
+        return json({ installed: true, enabled: false, restartRequired: true, manualReviewRequired: false });
+      }
       if (path === '/api/watchdog/start' && init?.method === 'POST') {
         return json({ ok: true, running: true });
       }
@@ -51,6 +68,15 @@ describe('local service API client', () => {
     await expect(api.startup()).resolves.toEqual({ installed: false });
     await api.installStartup();
     await api.uninstallStartup();
+    await expect(api.claudeHook()).resolves.toEqual({
+      installed: false,
+      enabled: false,
+      restartRequired: false,
+      manualReviewRequired: false,
+    });
+    await api.installClaudeHook();
+    await api.uninstallClaudeHook();
+    await api.disableClaudeHook();
     await api.start();
     await api.uninstall();
 
@@ -58,6 +84,10 @@ describe('local service API client', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/startup', expect.objectContaining({ headers: expect.any(Object) }));
     expect(fetchMock).toHaveBeenCalledWith('/api/startup/install', expect.objectContaining({ method: 'POST' }));
     expect(fetchMock).toHaveBeenCalledWith('/api/startup/uninstall', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenCalledWith('/api/claude-hook', expect.objectContaining({ headers: expect.any(Object) }));
+    expect(fetchMock).toHaveBeenCalledWith('/api/claude-hook/install', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenCalledWith('/api/claude-hook/uninstall', expect.objectContaining({ method: 'POST' }));
+    expect(fetchMock).toHaveBeenCalledWith('/api/claude-hook/disable', expect.objectContaining({ method: 'POST' }));
     expect(fetchMock).toHaveBeenCalledWith('/api/watchdog/start', expect.objectContaining({ method: 'POST' }));
     expect(fetchMock).toHaveBeenCalledWith('/api/uninstall', expect.objectContaining({ method: 'POST' }));
   });
@@ -72,8 +102,10 @@ describe('local service API client', () => {
 
     source.emit('audit', { id: 'event-1', timestampMs: 1, type: 'skip' });
     source.emit('sessions', { action: 'refresh', sessionId: 'claude:10' });
+    source.emit('claude-hook', { installed: true, enabled: false });
     expect(listener).toHaveBeenCalledWith({ kind: 'audit', event: { id: 'event-1', timestampMs: 1, type: 'skip' } });
     expect(listener).toHaveBeenCalledWith({ kind: 'sessions', data: { action: 'refresh', sessionId: 'claude:10' } });
+    expect(listener).toHaveBeenCalledWith({ kind: 'claude-hook', data: { installed: true, enabled: false } });
     unsubscribe();
     expect(source.closed).toBe(true);
   });

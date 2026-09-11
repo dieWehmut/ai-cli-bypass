@@ -3,6 +3,7 @@ export type TransportKind =
   | 'classic-console'
   | 'pty'
   | 'codex-app-server'
+  | 'claude-stop-hook'
   | 'monitor-only'
   | 'cannot-inject'
   | 'unknown';
@@ -39,7 +40,15 @@ export interface WatchdogConfig {
   defaultCooldownMs: number;
   maxAttemptsPerQuietPeriod: number;
   tools: {
-    claude: { enabled: boolean; normalPrompt: string };
+    claude: {
+      enabled: boolean;
+      normalPrompt: string;
+      stopHook: {
+        enabled: boolean;
+        leaseTtlMs: number;
+        commandTimeoutMs: number;
+      };
+    };
     codex: { enabled: boolean; normalPrompt: string; goalPrompt: string; goalStatuses: readonly string[] };
   };
   processFilters: { sameUserOnly: boolean; include: readonly string[]; exclude: readonly string[] };
@@ -68,9 +77,17 @@ export interface StartupTaskView {
   name?: string;
 }
 
+export interface ClaudeHookStatusView {
+  installed: boolean;
+  enabled: boolean;
+  restartRequired: boolean;
+  manualReviewRequired: boolean;
+  lastError?: string;
+}
+
 export type WatchdogEvent =
   | { readonly kind: 'audit'; readonly event: AuditEvent }
-  | { readonly kind: 'health' | 'sessions' | 'config' | 'ready'; readonly data: unknown };
+  | { readonly kind: 'health' | 'sessions' | 'config' | 'claude-hook' | 'ready'; readonly data: unknown };
 
 interface ServiceHealthResponse {
   readonly ok?: unknown;
@@ -93,6 +110,10 @@ export interface WatchdogApi {
   startup(): Promise<StartupTaskView>;
   installStartup(): Promise<void>;
   uninstallStartup(): Promise<void>;
+  claudeHook(): Promise<ClaudeHookStatusView>;
+  installClaudeHook(): Promise<ClaudeHookStatusView>;
+  uninstallClaudeHook(): Promise<ClaudeHookStatusView>;
+  disableClaudeHook(): Promise<ClaudeHookStatusView>;
   start(): Promise<void>;
   stop(): Promise<void>;
   uninstall(): Promise<void>;
@@ -141,6 +162,10 @@ export function createApi(): WatchdogApi {
     startup: () => request<StartupTaskView>('/startup'),
     installStartup: () => request<void>('/startup/install', { method: 'POST' }),
     uninstallStartup: () => request<void>('/startup/uninstall', { method: 'POST' }),
+    claudeHook: () => request<ClaudeHookStatusView>('/claude-hook'),
+    installClaudeHook: () => request<ClaudeHookStatusView>('/claude-hook/install', { method: 'POST' }),
+    uninstallClaudeHook: () => request<ClaudeHookStatusView>('/claude-hook/uninstall', { method: 'POST' }),
+    disableClaudeHook: () => request<ClaudeHookStatusView>('/claude-hook/disable', { method: 'POST' }),
     start: () => request<void>('/watchdog/start', { method: 'POST' }),
     stop: () => request<void>('/watchdog/stop', { method: 'POST' }),
     uninstall: () => request<void>('/uninstall', { method: 'POST' }),
@@ -156,7 +181,7 @@ export function createApi(): WatchdogApi {
           // Ignore malformed external events; the next poll repairs the view.
         }
       };
-      const listeners = (['audit', 'health', 'sessions', 'config', 'ready'] as const).map((kind) => {
+      const listeners = (['audit', 'health', 'sessions', 'config', 'claude-hook', 'ready'] as const).map((kind) => {
         const listener = (message: MessageEvent<string>) => receive(kind, message);
         source.addEventListener(kind, listener);
         return { kind, listener };

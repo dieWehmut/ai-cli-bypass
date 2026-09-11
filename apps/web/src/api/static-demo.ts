@@ -1,4 +1,11 @@
-import type { WatchdogApi, WatchdogConfig, SessionView, AuditEvent, HealthView } from './client';
+import type {
+  AuditEvent,
+  ClaudeHookStatusView,
+  HealthView,
+  SessionView,
+  WatchdogApi,
+  WatchdogConfig,
+} from './client';
 
 const initialConfig: WatchdogConfig = {
   enabled: true,
@@ -8,7 +15,11 @@ const initialConfig: WatchdogConfig = {
   defaultCooldownMs: 300_000,
   maxAttemptsPerQuietPeriod: 1,
   tools: {
-    claude: { enabled: true, normalPrompt: '继续' },
+    claude: {
+      enabled: true,
+      normalPrompt: '继续',
+      stopHook: { enabled: false, leaseTtlMs: 15_000, commandTimeoutMs: 1_500 },
+    },
     codex: { enabled: true, normalPrompt: '继续', goalPrompt: '/goal resume', goalStatuses: ['active', 'paused'] },
   },
   processFilters: { sameUserOnly: true, include: [], exclude: [] },
@@ -40,6 +51,15 @@ export function createStaticDemoApi(): WatchdogApi {
   let currentSessions = structuredClone(initialSessions);
   const currentHealth = structuredClone(initialHealth);
   let startupInstalled = false;
+  let hookInstallation: Omit<ClaudeHookStatusView, 'enabled'> = {
+    installed: false,
+    restartRequired: false,
+    manualReviewRequired: false,
+  };
+  const hookStatus = (): ClaudeHookStatusView => ({
+    ...structuredClone(hookInstallation),
+    enabled: currentConfig.tools.claude.stopHook.enabled,
+  });
   return {
     health: async () => structuredClone(currentHealth),
     config: async () => structuredClone(currentConfig),
@@ -52,6 +72,19 @@ export function createStaticDemoApi(): WatchdogApi {
     startup: async () => ({ installed: startupInstalled, name: 'Selbstlauf Continuation Watchdog' }),
     installStartup: async () => { startupInstalled = true; },
     uninstallStartup: async () => { startupInstalled = false; },
+    claudeHook: async () => hookStatus(),
+    installClaudeHook: async () => {
+      hookInstallation = { installed: true, restartRequired: true, manualReviewRequired: false };
+      return hookStatus();
+    },
+    uninstallClaudeHook: async () => {
+      hookInstallation = { installed: false, restartRequired: false, manualReviewRequired: false };
+      return hookStatus();
+    },
+    disableClaudeHook: async () => {
+      currentConfig.tools.claude.stopHook.enabled = false;
+      return hookStatus();
+    },
     start: async () => { currentHealth.running = true; },
     stop: async () => { currentHealth.running = false; },
     uninstall: async () => { currentHealth.running = false; },

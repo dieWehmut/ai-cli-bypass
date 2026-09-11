@@ -43,7 +43,11 @@ const fallbackConfig: WatchdogConfig = {
   defaultCooldownMs: 300_000,
   maxAttemptsPerQuietPeriod: 1,
   tools: {
-    claude: { enabled: true, normalPrompt: '继续' },
+    claude: {
+      enabled: true,
+      normalPrompt: '继续',
+      stopHook: { enabled: false, leaseTtlMs: 15_000, commandTimeoutMs: 1_500 },
+    },
     codex: {
       enabled: true,
       normalPrompt: '继续',
@@ -136,6 +140,7 @@ function transportLabel(transport: SessionView['transport']): string {
     'classic-console': 'Console',
     pty: 'PTY',
     'codex-app-server': 'App Server',
+    'claude-stop-hook': 'Stop Hook',
     'monitor-only': '仅监控',
     'cannot-inject': '不可写入',
     unknown: '待识别',
